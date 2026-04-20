@@ -12,7 +12,7 @@ const argv = process.argv.slice(2);
 const domain = argv[0] ?? 'example.com';
 const topN = Number.parseInt(argv[1] ?? '100', 10);
 const release = process.env.CC_RELEASE ?? 'cc-main-2026-jan-feb-mar';
-const threads = process.env.CC_THREADS ?? '0';
+const threads = Number.parseInt(process.env.CC_THREADS ?? '', 10);
 const cacheDir = `${process.env.HOME ?? process.env.USERPROFILE ?? tmpdir()}/.cache/cc-backlinks/${release}`;
 const baseUrl = `https://data.commoncrawl.org/projects/hyperlinkgraph/${release}/domain`;
 const verticesPath = `${cacheDir}/domain-vertices.txt.gz`;
@@ -106,7 +106,9 @@ async function main() {
   await download(`${baseUrl}/${release}-domain-vertices.txt.gz`, verticesPath);
   await download(`${baseUrl}/${release}-domain-edges.txt.gz`, edgesPath);
 
-  await runDuckDB(`PRAGMA threads=${threads};`);
+  if (Number.isFinite(threads) && isPositiveInteger(threads)) {
+    await runDuckDB(`PRAGMA threads=${threads};`);
+  }
 
   const escapedDomain = duckdbSqlEscape(reverseDomain(domain));
   log('>> checking domain exists in vertices ...');
