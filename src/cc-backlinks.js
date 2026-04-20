@@ -2,15 +2,17 @@
 import { access, mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { createWriteStream } from 'node:fs';
-import { dirname, basename } from 'node:path';
+import { dirname, basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import duckdb from 'duckdb';
 
 const argv = process.argv.slice(2);
 const hasTrailingTopN = argv.length > 0 && /^\d+$/.test(argv[argv.length - 1]);
-const topN = Number.parseInt(hasTrailingTopN ? argv[argv.length - 1] : '100', 10);
-const domains = (hasTrailingTopN ? argv.slice(0, -1) : argv).flatMap((value) => value.split(',').map((entry) => entry.trim()).filter(Boolean));
+const hasUnlimitedFlag = argv.length > 0 && /^(all|unlimited|--all)$/i.test(argv[argv.length - 1]);
+const topN = hasTrailingTopN ? Number.parseInt(argv[argv.length - 1], 10) : null;
+const domains = (hasTrailingTopN || hasUnlimitedFlag ? argv.slice(0, -1) : argv).flatMap((value) => value.split(',').map((entry) => entry.trim()).filter(Boolean));
 const requestedDomains = domains.length > 0 ? domains : ['example.com'];
 const release = process.env.CC_RELEASE ?? 'cc-main-2026-jan-feb-mar';
 const threads = Number.parseInt(process.env.CC_THREADS ?? '', 10);
@@ -18,6 +20,8 @@ const cacheDir = `${process.env.HOME ?? process.env.USERPROFILE ?? tmpdir()}/.ca
 const baseUrl = `https://data.commoncrawl.org/projects/hyperlinkgraph/${release}/domain`;
 const verticesPath = `${cacheDir}/domain-vertices.txt.gz`;
 const edgesPath = `${cacheDir}/domain-edges.txt.gz`;
+const repoRoot = process.cwd();
+const reportsDir = join(repoRoot, 'backlink-reports');
 
 const log = (message) => process.stderr.write(`${message}\n`);
 const fail = (message) => {
@@ -39,6 +43,12 @@ const formatBytes = (bytes) => {
 
   return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 };
+const formatDateString = (date) => {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = String(date.getFullYear());
+  return `${day}-${month}-${year}`;
+};
 const normalizeDomainCandidates = (value) => {
   const candidates = [value];
 
@@ -47,6 +57,36 @@ const normalizeDomainCandidates = (value) => {
   }
 
   return [...new Set(candidates)];
+};
+const sanitizeFileName = (value) => value.replace(/[^a-z0-9.-]+/gi, '_');
+const escapeMarkdownCell = (value) => String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
+const renderMarkdownTable = (rows) => {
+  const header = ['linking_domain', 'host_count', 'edge_count'];
+  const lines = [
+    `| ${header.join(' | ')} |`,
+    `| ${header.map(() => '---').join(' | ')} |`
+  ];
+
+  for (const row of rows) {
+    lines.push(`| ${escapeMarkdownCell(row.linking_domain)} | ${escapeMarkdownCell(row.host_count)} | ${escapeMarkdownCell(row.edge_count)} |`);
+  }
+
+  return lines.join('\n');
+};
+const renderReportMarkdown = ({ requestedDomain, matchedDomain, releaseName, queryDate, rows, noMatch }) => {
+  const title = `Backlinks for ${requestedDomain}`;
+  const sections = [
+    `# ${title}`,
+    '',
+    `- Requested domain: ${requestedDomain}`,
+    `- Matched domain: ${matchedDomain ?? 'not found'}`,
+    `- Release: ${releaseName}`,
+    `- Generated on: ${queryDate}`,
+    '',
+    noMatch ? 'No backlinks were found for this domain in the selected release.' : renderMarkdownTable(rows)
+  ];
+
+  return sections.join('\n');
 };
 
 const db = new duckdb.Database(':memory:');
@@ -63,6 +103,24 @@ async function pathExists(filePath) {
 
 async function ensureDir(filePath) {
   await mkdir(dirname(filePath), { recursive: true });
+}
+
+async function writeDomainReport({ requestedDomain, matchedDomain, rows, noMatch, queryDate }) {
+  const dateString = formatDateString(queryDate);
+  const fileName = `${sanitizeFileName(requestedDomain)}-${dateString}.md`;
+  const reportPath = join(reportsDir, fileName);
+  const reportMarkdown = renderReportMarkdown({
+    requestedDomain,
+    matchedDomain,
+    releaseName: release,
+    queryDate: queryDate.toISOString(),
+    rows,
+    noMatch
+  });
+
+  await ensureDir(reportPath);
+  await writeFile(reportPath, `${reportMarkdown}\n`, 'utf8');
+  log(`>> wrote report: ${reportPath}`);
 }
 
 async function download(url, destination) {
@@ -148,7 +206,9 @@ function closeConnection() {
 }
 
 async function main() {
-  if (!Number.isFinite(topN) || !isPositiveInteger(topN)) {
+  const queryDate = new Date();
+
+  if (topN !== null && (!Number.isFinite(topN) || !isPositiveInteger(topN))) {
     fail('top_n must be a positive integer');
   }
 
@@ -168,6 +228,8 @@ async function main() {
   if (Number.isFinite(threads) && isPositiveInteger(threads)) {
     await runDuckDB(`PRAGMA threads=${threads};`);
   }
+
+  const limitClause = topN === null ? '' : `\nLIMIT ${topN}`;
 
   for (const domain of requestedDomains) {
     const candidates = normalizeDomainCandidates(domain);
@@ -195,6 +257,13 @@ WHERE rev_domain = '${escapedCandidate}';
 
     if (!matchedDomain) {
       process.stdout.write(`\n[${domain}] no match found in the ${release} vertex file\n`);
+      await writeDomainReport({
+        requestedDomain: domain,
+        matchedDomain: null,
+        rows: [],
+        noMatch: true,
+        queryDate
+      });
       continue;
     }
 
@@ -230,13 +299,20 @@ FROM inbound i
 JOIN vertices v ON v.id = i.from_id
 GROUP BY v.rev_domain, v.num_hosts
 ORDER BY v.num_hosts DESC, linking_domain
-LIMIT ${topN};
+${limitClause};
 `);
 
     process.stdout.write(`\n[${domain}] results (${matchedDomain})\n`);
 
     if (resultRows.length === 0) {
       process.stdout.write('No backlinks found\n');
+      await writeDomainReport({
+        requestedDomain: domain,
+        matchedDomain,
+        rows: [],
+        noMatch: true,
+        queryDate
+      });
       continue;
     }
 
@@ -244,6 +320,14 @@ LIMIT ${topN};
     for (const row of resultRows) {
       process.stdout.write(`${row.linking_domain},${row.host_count},${row.edge_count}\n`);
     }
+
+    await writeDomainReport({
+      requestedDomain: domain,
+      matchedDomain,
+      rows: resultRows,
+      noMatch: false,
+      queryDate
+    });
   }
 }
 
