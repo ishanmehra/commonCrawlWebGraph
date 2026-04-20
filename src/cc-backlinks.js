@@ -5,7 +5,6 @@ import { createWriteStream } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { pipeline } from 'node:stream/promises';
 import duckdb from 'duckdb';
 
 const argv = process.argv.slice(2);
@@ -26,6 +25,18 @@ const fail = (message) => {
 const reverseDomain = (value) => value.split('.').reverse().join('.');
 const duckdbSqlEscape = (value) => value.replaceAll("'", "''");
 const isPositiveInteger = (value) => Number.isInteger(value) && value > 0;
+const formatBytes = (bytes) => {
+  const units = ['B', 'KiB', 'MiB', 'GiB'];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+};
 
 const db = new duckdb.Database(':memory:');
 const connection = db.connect();
@@ -65,7 +76,42 @@ async function download(url, destination) {
   }
 
   try {
-    await pipeline(response.body, createWriteStream(tempPath));
+    const totalBytes = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+    const output = createWriteStream(tempPath);
+    const outputClosed = new Promise((resolve, reject) => {
+      output.once('finish', resolve);
+      output.once('error', reject);
+    });
+    let downloadedBytes = 0;
+    let lastLoggedAt = Date.now();
+
+    try {
+      for await (const chunk of response.body) {
+        downloadedBytes += chunk.length;
+        if (!output.write(chunk)) {
+          await new Promise((resolve) => output.once('drain', resolve));
+        }
+
+        const now = Date.now();
+        if (now - lastLoggedAt >= 1000) {
+          lastLoggedAt = now;
+          if (Number.isFinite(totalBytes) && totalBytes > 0) {
+            const percent = ((downloadedBytes / totalBytes) * 100).toFixed(1);
+            process.stderr.write(`\r>> downloading ${basename(destination)} ... ${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)} (${percent}%)`);
+          } else {
+            process.stderr.write(`\r>> downloading ${basename(destination)} ... ${formatBytes(downloadedBytes)} downloaded`);
+          }
+        }
+      }
+
+      output.end();
+      await outputClosed;
+    } catch (error) {
+      output.destroy();
+      throw error;
+    }
+
+    process.stderr.write(`\r>> downloading ${basename(destination)} ... ${formatBytes(downloadedBytes)} complete\n`);
     await rename(tempPath, destination);
   } catch (error) {
     await unlink(tempPath).catch(() => {});
