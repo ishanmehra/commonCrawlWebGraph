@@ -60,6 +60,12 @@ const normalizeDomainCandidates = (value) => {
 };
 const sanitizeFileName = (value) => value.replace(/[^a-z0-9.-]+/gi, '_');
 const escapeMarkdownCell = (value) => String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
+const toJsonValue = (value) => typeof value === 'bigint' ? value.toString() : value;
+const normalizeReportRow = (row) => ({
+  linking_domain: toJsonValue(row.linking_domain),
+  host_count: toJsonValue(row.host_count),
+  edge_count: toJsonValue(row.edge_count)
+});
 const renderReportMarkdown = ({ requestedDomain, matchedDomain, releaseName, queryDate, rows, noMatch }) => {
   const payload = {
     requested_domain: requestedDomain,
@@ -67,11 +73,7 @@ const renderReportMarkdown = ({ requestedDomain, matchedDomain, releaseName, que
     release: releaseName,
     generated_on: queryDate,
     no_match: noMatch,
-    backlinks: rows.map((row) => ({
-      linking_domain: row.linking_domain,
-      host_count: row.host_count,
-      edge_count: row.edge_count
-    }))
+    backlinks: rows.map(normalizeReportRow)
   };
 
   const title = `Backlinks for ${requestedDomain}`;
