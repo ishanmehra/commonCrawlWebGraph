@@ -1,0 +1,19 @@
+{
+  "requested_domain": "meritexam.com",
+  "matched_domain": "meritexam.com",
+  "release": "cc-main-2026-jan-feb-mar",
+  "generated_on": "2026-04-21T04:31:13.514Z",
+  "no_match": false,
+  "backlinks": [
+    {
+      "linking_domain": "asiaweekguide.com",
+      "host_count": "2",
+      "edge_count": "1"
+    },
+    {
+      "linking_domain": "kakshaa.co",
+      "host_count": "1",
+      "edge_count": "1"
+    }
+  ]
+}
