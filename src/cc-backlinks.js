@@ -59,41 +59,12 @@ const normalizeDomainCandidates = (value) => {
   return [...new Set(candidates)];
 };
 const sanitizeFileName = (value) => value.replace(/[^a-z0-9.-]+/gi, '_');
-const escapeMarkdownCell = (value) => String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
 const toJsonValue = (value) => typeof value === 'bigint' ? value.toString() : value;
 const normalizeReportRow = (row) => ({
   linking_domain: toJsonValue(row.linking_domain),
   host_count: toJsonValue(row.host_count),
   edge_count: toJsonValue(row.edge_count)
 });
-const renderReportMarkdown = ({ requestedDomain, matchedDomain, releaseName, queryDate, rows, noMatch }) => {
-  const payload = {
-    requested_domain: requestedDomain,
-    matched_domain: matchedDomain,
-    release: releaseName,
-    generated_on: queryDate,
-    no_match: noMatch,
-    backlinks: rows.map(normalizeReportRow)
-  };
-
-  const title = `Backlinks for ${requestedDomain}`;
-  const sections = [
-    `# ${title}`,
-    '',
-    `- Requested domain: ${requestedDomain}`,
-    `- Matched domain: ${matchedDomain ?? 'not found'}`,
-    `- Release: ${releaseName}`,
-    `- Generated on: ${queryDate}`,
-    '',
-    '```json',
-    JSON.stringify(payload, null, 2),
-    '```',
-    '',
-    noMatch ? 'No backlinks were found for this domain in the selected release.' : ''
-  ];
-
-  return sections.filter(Boolean).join('\n');
-};
 
 const db = new duckdb.Database(':memory:');
 const connection = db.connect();
@@ -113,19 +84,19 @@ async function ensureDir(filePath) {
 
 async function writeDomainReport({ requestedDomain, matchedDomain, rows, noMatch, queryDate }) {
   const dateString = formatDateString(queryDate);
-  const fileName = `${sanitizeFileName(requestedDomain)}-${dateString}.md`;
+  const fileName = `${sanitizeFileName(requestedDomain)}-${dateString}.json`;
   const reportPath = join(reportsDir, fileName);
-  const reportMarkdown = renderReportMarkdown({
-    requestedDomain,
-    matchedDomain,
-    releaseName: release,
-    queryDate: queryDate.toISOString(),
-    rows,
-    noMatch
-  });
+  const reportJson = {
+    requested_domain: requestedDomain,
+    matched_domain: matchedDomain,
+    release: release,
+    generated_on: queryDate.toISOString(),
+    no_match: noMatch,
+    backlinks: rows.map(normalizeReportRow)
+  };
 
   await ensureDir(reportPath);
-  await writeFile(reportPath, `${reportMarkdown}\n`, 'utf8');
+  await writeFile(reportPath, `${JSON.stringify(reportJson, null, 2)}\n`, 'utf8');
   log(`>> wrote report: ${reportPath}`);
 }
 
