@@ -1,0 +1,44 @@
+{
+  "requested_domain": "learnohub.com",
+  "matched_domain": "learnohub.com",
+  "release": "cc-main-2026-jan-feb-mar",
+  "generated_on": "2026-04-21T04:31:13.514Z",
+  "no_match": false,
+  "backlinks": [
+    {
+      "linking_domain": "github.io",
+      "host_count": "284009",
+      "edge_count": "1"
+    },
+    {
+      "linking_domain": "google.com",
+      "host_count": "41269",
+      "edge_count": "1"
+    },
+    {
+      "linking_domain": "totuldespremame.ro",
+      "host_count": "6",
+      "edge_count": "1"
+    },
+    {
+      "linking_domain": "examfear.com",
+      "host_count": "2",
+      "edge_count": "1"
+    },
+    {
+      "linking_domain": "teachtoearn.in",
+      "host_count": "2",
+      "edge_count": "1"
+    },
+    {
+      "linking_domain": "donboscokalvisolai.org",
+      "host_count": "1",
+      "edge_count": "1"
+    },
+    {
+      "linking_domain": "seymo.ai",
+      "host_count": "1",
+      "edge_count": "1"
+    }
+  ]
+}
