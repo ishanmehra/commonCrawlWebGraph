@@ -61,3 +61,4 @@ npm run backlinks -- srichaitanya.net, uolo.com, jenni.ai, consensus.app, gramma
 
 npm run backlinks -- eduro.live
 npm run backlinks -- iaspyq.com
+npm run backlinks -- monomousumi.com, readwritetips.com, coachingkhojo.com
